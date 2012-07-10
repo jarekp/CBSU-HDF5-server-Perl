@@ -13,6 +13,7 @@ require Exporter;
 	&FLIST,
 	&PLIST,
 	&PINFO,
+	&TABLE,
 	&FINFO
 );
 $VERSION = '0.02';
@@ -208,7 +209,7 @@ sub FINFO
 	my $ir;
 	($i1, $i2, $ir) = $self->extract(\@data);
 	if($ir == 1){@data = $self->trim(\@data, $i1, $i2);}
-	shift @data;
+	#shift @data;
 	for(my $i=0; $i<=$#data; $i++)
 	{
 		(my $txttmp, $data[$i]) = split /\t/, $data[$i];
@@ -291,7 +292,7 @@ sub PINFO
 	my $attr = 1;
 	my $chr = 0;
 	my %chr_hash = {};
-	shift @data;
+	#shift @data;
 	for(my $i=0; $i<=$#data; $i++)
 	{
 		my $first;
@@ -336,12 +337,21 @@ sub PINFO
 		{
 			$chr_hash{'positions_dim1'} = $s2;
 		}
+		if($s1 eq "alleles")
+		{
+			$chr_hash{'positions_dim1'} = $s2;
+		}
 		if($s1 eq "markers")
 		{
 			$chr_hash{'markers_dim1'} = $s2;
 			if($s3 eq "indexed"){$chr_hash{'markers_indexed'} = 1;}
 		}
 		
+	}
+	if($chr>0)
+	{
+		my $chr_txt = _encode_hash(\%chr_hash);
+		push @array_of_chromosomes, $chr_txt;
 	}
 	my @retarray = (\%attributes_hash, \%taxa_info_hash, \@array_of_chromosomes);
 	return @retarray;
@@ -385,24 +395,32 @@ sub QUERY
 	if($args{'pstride'} eq ""){$args{'pstride'} = '1';}
 	if($args{'tstride'} eq ""){$args{'tstride'} = '1';}
 	my $positions_ref = $args{'positions'};
-	if($positions_ref == undef)
+	my @positions = ();
+	if($positions_ref == undef && $args{'prange'} ne "all")
 	{
 		$self->{ERR} = "Missing positions array\n";
 		return;
 	}
-	my @positions = @$positions_ref;
+	elsif($positions_ref != undef && $args{'prange'} ne "all")
+	{
+		@positions = @$positions_ref;
+	}
 	if($#positions != 1 && $args{'prange'} eq 'range')
 	{
 		$self->{ERR} = "Positions type 'range' requires 2 positions in positions array\n";
 		return;
 	}
 	my $taxa_ref = $args{'taxa'};
-	if($taxa_ref == undef)
+	my @taxa = ();
+	if($taxa_ref == undef && $args{'trange'} ne "all")
 	{
 		$self->{ERR} = "Missing taxa array\n";
 		return;
 	}
-	my @taxa = @$taxa_ref;
+	elsif($taxa_ref != undef && $args{'trange'} ne "all")
+	{
+		@taxa = @$taxa_ref;
+	}
 	if($#taxa != 1 && $args{'trange'} eq 'range')
 	{
 		$self->{ERR} = "Taxa type 'range' requires 2 taxa in taxa array\n";
@@ -464,11 +482,26 @@ sub QUERY
 	{
 		return;
 	}
+	#if destination is file, return file name
+	if($args{'dest'} eq "file")
+	{
+		return ($data[0]);	
+	}
+	
 	#convert data based on encoding
 	shift @data;
 	my @tmparr = split / +/, $data[0];
-	shift @data;
 	my $enc = 1*$tmparr[3];	
+	shift @data;
+	@tmparr = split / +/, $data[0];
+	my $orientation = $tmparr[2];
+	shift @data;
+	@tmparr = split / +/, $data[0];
+	my $np = 1*$tmparr[3];
+	shift @data;
+	@tmparr = split / +/, $data[0];
+	my $nt = 1*$tmparr[3];
+	shift @data;
 	if($enc == 1 && $args{'format'}  eq 'num')
 	{
 	}
@@ -479,9 +512,99 @@ sub QUERY
 	{
 	}
 
-	return ($enc, \@data);
+	return ($enc, $orientation, $np, $nt, \@data);
 }
 
+sub TABLE
+{
+	(my $self, my @arg) = @_;
+
+	my %args = @arg;
+
+#set default values for input args
+	if($args{'project'} eq "")
+	{
+		$self->{ERR} = "Project name missing\n";
+		return;
+	}
+	if($args{'chr'} eq "")
+	{
+		$self->{ERR} = "Chromosome name missing\n";
+		return;
+	}
+	if($args{'user'} eq "")
+	{
+		$self->{ERR} = "User name missing\n";
+		return;
+	}
+	if($args{'password'} eq "")
+	{
+		$self->{ERR} = "User password missing\n";
+		return;
+	}
+	if($args{'starting_index'} eq "")
+	{
+		$self->{ERR} = "Starting index missing\n";
+		return;
+	}
+	if($args{'ending_index'} eq "")
+	{
+		$self->{ERR} = "Ending index missing\n";
+		return;
+	}
+	if($args{'table'} eq "")
+	{
+		$self->{ERR} = "Table name missing\n";
+		return;
+	}
+	if($args{'table'} ne "positions" && $args{'table'} ne "taxa" && $args{'table'} ne "markers" && $args{'table'} ne "alleles")
+	{
+		$self->{ERR} = "Table name can only be 'positions', 'markers' or 'taxa'\n";
+		return;
+	}
+
+	my $querystr = "TABLE\n";
+	$querystr .= $args{'user'} . "\n";
+	$querystr .= $args{'password'} . "\n";
+	$querystr .= $args{'table'} . "\n";
+	$querystr .= $args{'project'} . "\n";
+	$querystr .= $args{'chr'} . "\n";
+	$querystr .= $args{'starting_index'} . "\n";
+	$querystr .= $args{'ending_index'} . "\n";
+	$querystr .= "\n";
+	
+	$| = 1;
+	my $socket = $self->open();
+	if($args{'debug'} == '1')
+	{
+		print  $querystr;
+	}
+	print  $socket $querystr;
+	
+	my @data;
+	while(my $txt = <$socket>)
+	{
+		if($args{'debug'} == '1')
+		{
+			print $txt;
+		}
+		chomp $txt;
+		push @data, $txt;	
+	}
+	$socket->close();	
+
+	my ($i1, $i2, $ir) = $self->extract(\@data);
+	if($ir == 1)
+	{
+		@data = $self->trim(\@data, $i1, $i2);
+	}
+	else
+	{
+		return;
+	}
+
+	return (\@data);
+}
 
 1;
 __END__
@@ -492,9 +615,10 @@ CBSU::hdf5 - A module to access CBSU hdf5 server
 
 =head1 SYNOPSIS
 
+#!/usr/local/bin/perl
 use CBSU::hdf5;
 
-my $hdf5 = CBSU::hdf5->new("yourhdf5servername", "12001"); #server name or ip address, port number
+my $hdf5 = CBSU::hdf5->new("servername.domain.com", "12001"); #server name or ip address, port number
 
 my $file, $project, $chr, $taxadim, $posdim;
 
@@ -512,6 +636,9 @@ else
 	}
 }
 print "---\n";
+print "press ENTER to continue\n";
+<>;
+
 $file = $tbl[0];
 
 print "\nPLIST command\n---\n";
@@ -528,6 +655,9 @@ else
 	}
 }
 print "---\n";
+print "press ENTER to continue\n";
+<>;
+
 $project = $tbl[0];
 
 print "\nFINFO $file command\n---\n";
@@ -544,6 +674,9 @@ else
 	}
 }
 print "---\n";
+print "press ENTER to continue\n";
+<>;
+
 
 print "\nPINFO $project command\n---\n";
 ($attr_ref, $taxa_ref, $chrs_ref) = $hdf5->PINFO($project);
@@ -586,7 +719,11 @@ else
 	}
 }
 print "---\n";
+print "press ENTER to continue\n";
+<>;
 
+
+print "\nQUERY (defaults, output directly to client)\n---\n";
 #choose range fo query
 $taxacount = 10;
 if($taxacount>$taxadim){$taxacount=$taxadim};
@@ -596,7 +733,7 @@ $posq1 = int(rand($posdim - $poscount));
 $posq2 = $posq1 + $poscount;
 $taxaq1 = int(rand($taxadim - $taxacount));
 $taxaq2 = $taxaq1 + $taxacount;
-print "\nQUERY $project $chr $posq1 $posq2 $taxaq1 $taxaq2 command (defaults)\n---\n";
+print "\nINPUT: project=$project chr=$chr positions: $posq1 $posq2 taxa: $taxaq1 $taxaq2 \n---\n";
 my @posqarr;
 $posqarray[0] = $posq1;
 $posqarray[1] = $posq2;
@@ -604,21 +741,34 @@ my @taxaqarr;
 $taxaqarr[0] = $taxaq1;
 $taxaqarr[1] = $taxaq2;
 #query with default parameters and minimal input list
-my ($enc, $data_ref) = $hdf5->QUERY(
-        'user' => 'username',
-        'password' => 'userpassword',
-        'project' => $project,
-        'chr' => $chr,
-        'positions' => \@posqarray,
-        'taxa' => \@taxaqarr);
+my ($enc, $orientation, $np, $nt, $data_ref) = $hdf5->QUERY(
+	'user' => 'serveradmin', 
+	'password' => 'password_text', 
+	'project' => $project, 
+	'chr' => $chr, 
+	'positions' => \@posqarray, 
+	'taxa' => \@taxaqarr);
 my @data = @$data_ref;
+#data array contains actual data array with fast dimension in each line
+# followed by positions vector, alleles vector, taxa vector and (optional) markers vector
+my $nn;
+print "*** $enc bytes per data point, orientation=$orientation positions=$np taxa=$nt\n";
+if($orientation eq "pf")
+{
+	$nn = $nt;
+}
+else
+{
+	$nn = $np;
+}
 if($hdf5->{ERR} ne "")
 {
 	print "ERROR: ". $hdf5->{ERR} . "\n";
 }
 else
 {
-	for($i=0; $i<=$#data; $i++)
+	print "DATA ARRAY\n";
+	for($i=0; $i<$nn; $i++)
 	{
 		if($enc == 1)
 		{
@@ -642,9 +792,40 @@ else
 			print "\n";
 		}
 	}
+	my $n1 = $nn;
+	print "POSITIONS VECTOR\n";
+	for($i=$n1; $i<$n1+$np; $i++)
+	{
+		print $data[$i] . "\n";
+	}
+	$n1 = $nn + $np;
+	print "ALLELES VECTOR\n";
+	for($i=$n1; $i<$n1+$np; $i++)
+	{
+		print $data[$i] . "\n";
+	}
+	$n1 = $nn + $np + $np;
+	print "TAXA VECTOR\n";
+	for($i=$n1; $i<$n1+$nt; $i++)
+	{
+		print $data[$i] . "\n";
+	}
+	$n1 = $nn + $np + $np + $nt;
+	print "MARKERS VECTOR\n";
+	if($n1 < $#data)
+	{
+		for($i=$n1; $i<$n1+$np; $i++)
+		{
+			print $data[$i] . "\n";
+		}
+	}
 }
 print "---\n";
+print "press ENTER to continue\n";
+<>;
 
+
+print "\nQUERY (all parameters, output directly to client)\n---\n";
 $taxacount = 10;
 if($taxacount>$taxadim){$taxacount=$taxadim};
 $poscount = 100;
@@ -653,40 +834,52 @@ $posq1 = int(rand($posdim - $poscount));
 $posq2 = $posq1 + $poscount;
 $taxaq1 = int(rand($taxadim - $taxacount));
 $taxaq2 = $taxaq1 + $taxacount;
-print "\nQUERY $project $chr $posq1 $posq2 $taxaq1 $taxaq2 command (all parameters)\n---\n";
+print "\nINPUT: project=$project chr=$chr positions: $posq1 $posq2 taxa: $taxaq1 $taxaq2 \n---\n";
 my @posqarr;
 $posqarray[0] = $posq1;
 $posqarray[1] = $posq2;
 my @taxaqarr;
 $taxaqarr[0] = $taxaq1;
 $taxaqarr[1] = $taxaq2;
-my ($enc, $data_ref) = $hdf5->QUERY(
-        'user' => 'username',   #user name (name of the administartive user is 'serveradmin')
-        'password' => 'pass',   #user password
-        'debug' => 0,           # print server communication for debugging
-        'project' => $project,  #project name
-        'chr' => $chr,          #chromosome name
-        'dest' => 'std',        #data destination: 'std' - IO stream, 'file' - file on server
-        'format' => 'let',      #server output data format: 'let' - letters (one byte char array), 'num' - numbers (one byte each)
-                                #this option is not used by Perl module since output is always 2D array of bytes
-        'orientation' => 'auto',#queried data orientation array: 'auto' - server decides, 'pf' - positions fast, 'tf' - taxa fast       
-        'prange' => 'range',    #positions query range: 'range' - between two positions, 'list' - list of positions, 'all' - all positions
-        'ptype' => 'indexes',   #type of positions queried: 'indexes' - index of the array, 'markers' - marker names, 'positions' - positions
-        'pstride' => 2,         #server will read every 'pstride' element in the range , default 1
-        'positions' => \@posqarray, #array of positions values to query
-        'trange' => 'range',    #positions query range: 'range' - between two taxa, 'list' - list of taxa, 'all' - all taxa
-        'ttype' => 'indexes',   #type of taxa queried: 'indexes' - index of the array, 'taxa' - taxa names
-        'tstride' => 1,         #server will read every 'pstride' element in the range, default 1
-        'taxa' => \@taxaqarr,   #array of taxa values to query
-        );
+my ($enc, $orientation, $np, $nt, $data_ref) = $hdf5->QUERY(
+	'user' => 'serveradmin',  #user name (name of the administartive user is 'serveradmin')
+	'password' => 'password_text',  #user password
+	'debug' => 0,	  	# print server communication for debugging
+	'project' => $project,  #project name
+	'chr' => $chr, 		#chromosome name
+	'dest' => 'std',	#data destination: 'std' - IO stream, 'file' - file on server
+	'format' => 'let',	#server output data format: 'let' - letters (one byte char array), 'num' - numbers (one byte each)
+				#this option is not used by Perl module since output is always 2D array of bytes
+	'orientation' => 'auto',#queried data orientation array: 'auto' - server decides, 'pf' - positions fast, 'tf' - taxa fast	
+	'prange' => 'range',	#positions query range: 'range' - between two positions, 'list' - list of positions, 'all' - all positions
+	'ptype' => 'indexes',	#type of positions queried: 'indexes' - index of the array, 'markers' - marker names, 'positions' - positions
+	'pstride' => 2,		#server will read every 'pstride' element in the range , default 1
+	'positions' => \@posqarray, #array of positions values to query
+	'trange' => 'range',	#positions query range: 'range' - between two taxa, 'list' - list of taxa, 'all' - all taxa
+	'ttype' => 'indexes',	#type of taxa queried: 'indexes' - index of the array, 'taxa' - taxa names
+	'tstride' => 1,		#server will read every 'pstride' element in the range, default 1
+	'taxa' => \@taxaqarr,	#array of taxa values to query
+	);
 my @data = @$data_ref;
+#data array contains actual data array with fast dimension in each line
+# followed by positions vector, alleles vector, taxa vector and (optional) markers vector
+my $nn;
+print "*** $enc bytes per data point, orientation=$orientation positions=$np taxa=$nt\n";
+if($orientation eq "pf")
+{
+	$nn = $nt;
+}
+else
+{
+	$nn = $np;
+}
 if($hdf5->{ERR} ne "")
 {
 	print "ERROR: ". $hdf5->{ERR} . "\n";
 }
 else
 {
-	for($i=0; $i<=$#data; $i++)
+	for($i=0; $i<$nn; $i++)
 	{
 		if($enc == 1)
 		{
@@ -709,6 +902,204 @@ else
 			}	
 			print "\n";
 		}
+	}
+	my $n1 = $nn;
+	print "POSITIONS VECTOR\n";
+	for($i=$n1; $i<$n1+$np; $i++)
+	{
+		print $data[$i] . "\n";
+	}
+	$n1 = $nn + $np;
+	print "ALLELES VECTOR\n";
+	for($i=$n1; $i<$n1+$np; $i++)
+	{
+		print $data[$i] . "\n";
+	}
+	$n1 = $nn + $np + $np;
+	print "TAXA VECTOR\n";
+	for($i=$n1; $i<$n1+$nt; $i++)
+	{
+		print $data[$i] . "\n";
+	}
+	$n1 = $nn + $np + $np + $nt;
+	print "MARKERS VECTOR\n";
+	if($n1 < $#data)
+	{
+		for($i=$n1; $i<$n1+$np; $i++)
+		{
+			print $data[$i] . "\n";
+		}
+	}
+}
+print "---\n";
+print "press ENTER to continue\n";
+<>;
+
+print "\nQUERY (defaults, output to a file on server)\n---\n";
+#here we assume that serevr has been configured to make the results files accessible via URL
+#please contact you server administrators for information on how they expose these files
+#choose range fo query
+$taxacount = 10;
+if($taxacount>$taxadim){$taxacount=$taxadim};
+$poscount = 50;
+if($poscount>$posdim){$poscount=$posdim};
+$posq1 = int(rand($posdim - $poscount));
+$posq2 = $posq1 + $poscount;
+$taxaq1 = int(rand($taxadim - $taxacount));
+$taxaq2 = $taxaq1 + $taxacount;
+print "\nINPUT: project=$project chr=$chr positions: $posq1 $posq2 taxa: $taxaq1 $taxaq2 \n---\n";
+my @posqarr;
+$posqarray[0] = $posq1;
+$posqarray[1] = $posq2;
+my @taxaqarr;
+$taxaqarr[0] = $taxaq1;
+$taxaqarr[1] = $taxaq2;
+#query with default parameters and minimal input list
+my ($filename) = $hdf5->QUERY(
+	'user' => 'serveradmin', 
+	'password' => 'password_text', 
+	'dest' => 'file',	#data destination: 'std' - IO stream, 'file' - file on server
+	'project' => $project, 
+	'chr' => $chr, 
+	'positions' => \@posqarray, 
+	'taxa' => \@taxaqarr);
+print "Server output file name $filename\n";
+print "URL to read http://cbsuss06.tc.cornell.edu/hdfdata/$filename\n";
+#reading the file 
+my @data;
+$urlerr = "";
+if($hdf5->{ERR} eq "")
+{
+	use LWP;
+	$ua=LWP::UserAgent->new;
+	$ua->agent("MyApp/0.1 ");
+	$adr = "http://cbsuss06.tc.cornell.edu/hdf5data/$filename";
+	$req = HTTP::Request->new(GET => $adr);
+	my $res = $ua->request($req);
+	if ($res->is_success) 
+	{
+		@data = split /\n/, $res->content;
+		shift @data;
+	        my @tmparr = split / +/, $data[0];
+       		$enc = 1*$tmparr[3];
+		shift @data;
+		@tmparr = split / +/, $data[0];
+		$orientation = $tmparr[2];
+		shift @data;
+		@tmparr = split / +/, $data[0];
+		$np = 1*$tmparr[3];
+		shift @data;
+		@tmparr = split / +/, $data[0];
+		$nt = 1*$tmparr[3];
+		shift @data;
+	}
+	else
+	{
+		$urlerr = "ERROR: Can't open URL\n";
+	}
+}
+
+#data array contains actual data array with fast dimension in each line
+# followed by positions vector, alleles vector, taxa vector and (optional) markers vector
+my $nn;
+print "*** $enc bytes per data point, orientation=$orientation positions=$np taxa=$nt\n";
+if($orientation eq "pf")
+{
+	$nn = $nt;
+}
+else
+{
+	$nn = $np;
+}
+if($hdf5->{ERR} ne "")
+{
+	print "ERROR: ". $hdf5->{ERR} . "\n";
+}
+elsif($urlerror ne "")
+{
+	print $urlerror;
+}
+else
+{
+	print "DATA ARRAY\n";
+	for($i=0; $i<$nn; $i++)
+	{
+		if($enc == 1)
+		{
+			print $data[$i] . "\n";
+		}
+		else
+		{
+			my @arr = split '', $data[$i]; #get an array of ascii values, only every $enc is printable as character
+			for($j=0; $j<=$#arr; $j++)
+			{
+				if($j % $enc == 0)
+				{
+					if($j>0){print " ";}
+					print $arr[$j];
+				}
+				else
+				{
+					print " " . ord($arr[$j]);
+				}
+			}	
+			print "\n";
+		}
+	}
+	my $n1 = $nn;
+	print "POSITIONS VECTOR\n";
+	for($i=$n1; $i<$n1+$np; $i++)
+	{
+		print $data[$i] . "\n";
+	}
+	$n1 = $nn + $np;
+	print "ALLELES VECTOR\n";
+	for($i=$n1; $i<$n1+$np; $i++)
+	{
+		print $data[$i] . "\n";
+	}
+	$n1 = $nn + $np + $np;
+	print "TAXA VECTOR\n";
+	for($i=$n1; $i<$n1+$nt; $i++)
+	{
+		print $data[$i] . "\n";
+	}
+	$n1 = $nn + $np + $np + $nt;
+	print "MARKERS VECTOR\n";
+	if($n1 < $#data)
+	{
+		for($i=$n1; $i<$n1+$np; $i++)
+		{
+			print $data[$i] . "\n";
+		}
+	}
+}
+print "---\n";
+print "press ENTER to continue\n";
+<>;
+$table = 'alleles';
+$starting_index=1;
+$ending_index=23;
+print "\nTABLE $project $chr $table $starting_index $ending_index command (all parameters)\n---\n";
+my ($data_ref) = $hdf5->TABLE(
+	'user' => 'serveradmin',  #user name (name of the administartive user is 'serveradmin')
+	'password' => 'password_text',  #user password
+	'project' => $project,  #project name
+	'chr' => $chr, 		#chromosome name
+	'table' => $table,	#name of the table: 'taxa', 'positions' or 'markers'
+	'starting_index' => $starting_index,	#starting index of the table
+	'ending_index' => $ending_index	#ending index of the table
+	);
+my @data = @$data_ref;
+if($hdf5->{ERR} ne "")
+{
+	print "ERROR: ". $hdf5->{ERR} . "\n";
+}
+else
+{
+	for($i=0; $i<=$#data; $i++)
+	{
+		print $data[$i] . "\n";
 	}
 }
 print "---\n";
