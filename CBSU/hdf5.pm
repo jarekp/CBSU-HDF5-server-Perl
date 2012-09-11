@@ -14,9 +14,13 @@ require Exporter;
 	&PLIST,
 	&PINFO,
 	&TABLE,
+	&QUERY,
+	&USERPASS,
+	&ADMINCMD,
+	&LOGIN,
 	&FINFO
 );
-$VERSION = '0.02';
+$VERSION = '0.03';
 
 sub new
 {
@@ -130,6 +134,7 @@ sub FLIST
 {
 	my $self = shift;
 
+	$self->{ERR} = "";
 	$| = 1;
 	my $socket = $self->open();
 	print  $socket "FLIST\n\n";
@@ -158,6 +163,7 @@ sub PLIST
 {
 	my $self = shift;
 
+	$self->{ERR} = "";
 	$| = 1;
 	my $socket = $self->open();
 	print  $socket "PLIST\n\n";
@@ -188,9 +194,10 @@ sub FINFO
 	my $self = shift;
 	my $file = shift;
 
+	$self->{ERR} = "";
 	if($file eq "")
 	{
-		carp "file name empty";
+		$self->{ERR} = "file name empty";
 		return;
 	}
 	$| = 1;
@@ -257,13 +264,14 @@ sub PINFO
 	my $self = shift;
 	my $project = shift;
 	
+	$self->{ERR} = "";
 	my %attributes_hash;
 	my @array_of_chromosomes;
 	my %taxa_info_hash = ('dim1' => 0, 'indexed' => 0);
 
 	if($project eq "")
 	{
-		carp "project name empty";
+		$self->{ERR} = "project name empty";
 		return;
 	}
 	$| = 1;
@@ -362,6 +370,7 @@ sub QUERY
 	(my $self, my @arg) = @_;
 
 	my %args = @arg;
+	$self->{ERR} = "";
 
 #set default values for input args
 	if($args{'project'} eq "")
@@ -520,6 +529,7 @@ sub TABLE
 	(my $self, my @arg) = @_;
 
 	my %args = @arg;
+	$self->{ERR} = "";
 
 #set default values for input args
 	if($args{'project'} eq "")
@@ -559,7 +569,7 @@ sub TABLE
 	}
 	if($args{'table'} ne "positions" && $args{'table'} ne "taxa" && $args{'table'} ne "markers" && $args{'table'} ne "alleles")
 	{
-		$self->{ERR} = "Table name can only be 'positions', 'markers' or 'taxa'\n";
+		$self->{ERR} = "Table name can only be 'positions', 'markers', 'alleles' or 'taxa'\n";
 		return;
 	}
 
@@ -606,6 +616,129 @@ sub TABLE
 	return (\@data);
 }
 
+sub USERPASS
+{
+	my $self = shift;
+	my $uname = shift;
+	my $oldpass = shift;
+	my $newpass = shift;
+
+	$self->{ERR} = "";
+	if($uname eq "")
+	{
+		$self->{ERR} = "user name is empty";
+		return;
+	}
+	if($oldpass eq "")
+	{
+		$self->{ERR} = "old password is empty";
+		return;
+	}
+	if($newpass eq "")
+	{
+		$self->{ERR} = "new password is empty";
+		return;
+	}
+	$| = 1;
+	my $socket = $self->open();
+	print  $socket "USERPASS\n$uname\n$oldpass\n$newpass\n\n";
+	
+	my @data;
+	while(my $txt = <$socket>)
+	{
+		chomp $txt;
+		push @data, $txt;	
+	}
+	$socket->close();	
+	my $i1;
+	my $i2;
+	my $ir;
+	($i1, $i2, $ir) = $self->extract(\@data);
+	if($ir == 1){@data = $self->trim(\@data, $i1, $i2);}
+	return;
+}
+
+sub LOGIN
+{
+	my $self = shift;
+	my $uname = shift;
+	my $pass = shift;
+
+	$self->{ERR} = "";
+	if($uname eq "")
+	{
+		$self->{ERR} = "user name is empty";
+		return;
+	}
+	if($pass eq "")
+	{
+		$self->{ERR} = "password is empty";
+		return;
+	}
+	$| = 1;
+	my $socket = $self->open();
+	print  $socket "LOGIN\n$uname\n$pass\n\n";
+	
+	my @data;
+	while(my $txt = <$socket>)
+	{
+		chomp $txt;
+		push @data, $txt;	
+	}
+	$socket->close();	
+	my $i1;
+	my $i2;
+	my $ir;
+	($i1, $i2, $ir) = $self->extract(\@data);
+	if($ir == 1){@data = $self->trim(\@data, $i1, $i2);}
+	return @data;
+}
+
+sub ADMINCMD
+{
+	(my $self, my $password, my $command, my @arg) = @_;
+
+	$self->{ERR} = "";
+	if($password eq "" && $command ne "LISTALL")
+	{
+		$self->{ERR} =  "password is empty";
+		return;
+	}
+	if($command eq "")
+	{
+		$self->{ERR} =  "command is empty";
+		return;
+	}
+	if(index("|MOUNT|UMOUNT|INDEX|AFLIST|USERADD|USERDEL|USERACC|ULIST|LISTALL|", "|" . $command . "|") == -1)
+	{
+		$self->{ERR} =  "invalid command";
+		return;
+	}
+	my $cmdtxt = "$command\n$password\n";
+	if($command eq "LISTALL"){$cmdtxt = "$command\n";}
+	for(my $i=0; $i<=$#arg; $i++)
+	{
+		$cmdtxt .= $arg[$i] . "\n";
+	}
+	$| = 1;
+	my $socket = $self->open();
+	print  $socket "$cmdtxt\n";
+	
+	my @data;
+	while(my $txt = <$socket>)
+	{
+		chomp $txt;
+		push @data, $txt;	
+	}
+	$socket->close();	
+	my $i1;
+	my $i2;
+	my $ir;
+	($i1, $i2, $ir) = $self->extract(\@data);
+	if($ir == 1){@data = $self->trim(\@data, $i1, $i2);}
+	return @data;
+}
+
 1;
 __END__
 
@@ -614,6 +747,18 @@ __END__
 CBSU::hdf5 - A module to access CBSU hdf5 server
 
 =head1 SYNOPSIS
+
+# Implemented hdf5 server functions:
+# FLIST		list all mounted hdf5 files
+# PLIST		list all available projects
+# FINFO		information about mounted file
+# PINFO		information about available project
+# TABLE		query supporting data tables: positions, markers, taxa or alleles
+# QUERY		query main data array
+# USERPASS	change user password
+# ADMINCMD	execute administrative command (see hdf5 server command reference)
+#         	available admin commands: MOUNT, UMOUNT, INDEX, AFLIST, USERADD, USERDEL, USERACC, ULIST
+
 
 #!/usr/local/bin/perl
 use CBSU::hdf5;
