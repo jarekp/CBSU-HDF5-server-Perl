@@ -18,6 +18,7 @@ require Exporter;
 	&USERPASS,
 	&ADMINCMD,
 	&LOGIN,
+	&HAPMAP,
 	&FINFO
 );
 $VERSION = '0.03';
@@ -572,6 +573,7 @@ sub TABLE
 		$self->{ERR} = "Table name can only be 'positions', 'markers', 'alleles' or 'taxa'\n";
 		return;
 	}
+	if($args{'position_type'} eq ""){$args{'position_type'} = 'index';}
 
 	my $querystr = "TABLE\n";
 	$querystr .= $args{'user'} . "\n";
@@ -579,6 +581,7 @@ sub TABLE
 	$querystr .= $args{'table'} . "\n";
 	$querystr .= $args{'project'} . "\n";
 	$querystr .= $args{'chr'} . "\n";
+	$querystr .= $args{'position_type'} . "\n";
 	$querystr .= $args{'starting_index'} . "\n";
 	$querystr .= $args{'ending_index'} . "\n";
 	$querystr .= "\n";
@@ -614,6 +617,338 @@ sub TABLE
 	}
 
 	return (\@data);
+}
+
+sub HAPMAP
+{
+	(my $self, my @arg) = @_;
+
+	my %args = @arg;
+	$self->{ERR} = "";
+
+	my $data_ref = $args{'data'};
+	my @data = ();
+	if($data_ref == undef)
+	{
+		$self->{ERR} = "Missing data array\n";
+		return;
+	}
+	if($args{'orientation'} eq undef)
+	{
+		$self->{ERR} = "Missing orientation parameter\n";
+		return;
+	}
+	if($args{'filename'} eq undef)
+	{
+		$self->{ERR} = "Missing file name parameter\n";
+		return;
+	}
+	if($args{'np'} eq undef)
+	{
+		$self->{ERR} = "Missing np parameter\n";
+		return;
+	}
+	if($args{'nt'} eq undef)
+	{
+		$self->{ERR} = "Missing nt parameter\n";
+		return;
+	}
+	if($args{'enc'} eq undef)
+	{
+		$self->{ERR} = "Missing enc parameter\n";
+		return;
+	}
+	if($args{'chr'} eq undef)
+	{
+		$self->{ERR} = "Missing chr name parameter\n";
+		return;
+	}
+	if($args{'genome_ver'} eq undef)
+	{
+		$self->{ERR} = "Missing genome_ver parameter\n";
+		return;
+	}
+	my $progress;
+	if($args{'progress'} eq undef)
+	{
+		$progress = 0;
+	}
+	else
+	{
+		$progress = $args{'progress'}
+	}
+	my $outformat = "IUPAC";
+	if($args{"format"} ne undef && $args{"format"} ne ""){$outformat=$args{"format"};}
+	my $tmpdir = "";
+	my $outfname=$args{'filename'};
+	my $orientation=$args{'orientation'};
+	my $np=$args{'np'};
+	my $nt=$args{'nt'};
+	my $chr=$args{'chr'};
+	my $genome_ver=$args{'genome_ver'};
+	my $enc=$args{'enc'};
+	my $flush=$args{'flush'};
+	@data = @$data_ref;
+	
+	if($orientation eq "tf")
+	{
+		my $isfilenew = 1;
+		if( -s $outfname) { $isfilenew = 0; }
+
+		open(OUT,">>$outfname");
+
+                my $nn = $np;
+                my $n_taxa = $nn + $np + $np;
+                my $n_marker = $nn + $np + $np + $nt;
+                my $n_allele = $nn + $np;
+
+		if($isfilenew)
+		{
+        		# print the beginning headers and the TAXA line (only if this is a new file being open)
+			print OUT "rs#\talleles\tchrom\tpos\tstrand\tassembly#\tcenter\tprotLSID\tassayLSID\tpanelLSID\tQCcode\t";
+        		for(my $ii=$n_taxa; $ii<$n_taxa+$nt; $ii++)
+        		{
+                		print OUT $data[$ii] . "\t";
+        		}
+			print OUT "\n";
+		}  # if $isfilenew
+
+		# Loop over positions
+		my $allit = 0;
+		for(my $pos=0;$pos<$np;$pos++)
+		{
+			$allit += length($data[$pos]); #get an array of ascii values, only every $enc is printable as character
+		}
+		my $curit = 0;
+		my $pstep = 0;
+		if($progress>0){$pstep = int($allit/$progress);}
+		for(my $pos=0;$pos<$np;$pos++)
+		{
+			my $markerstr = $data[$pos+$n_marker];
+			if($data[$pos+$n_marker] eq "Cannot open table markers" || $data[$pos+$n_marker] eq "")
+			{
+				$markerstr = $chr . "_" . $data[$pos+$np];	
+			}
+			# Print the marker
+			print OUT "$markerstr";
+			# Print the alleles and extract the individual ones (for numerical encoding)
+			print OUT "\t$data[$pos+$n_allele]";
+			my @alleles = split "/", $data[$pos+$n_allele];
+			# print the chromosome
+			print OUT "\t$chr";
+			# print position and strand (always "+")
+			print OUT "\t$data[$pos+$np]\t+";
+			# print genome version (assembly#)
+			print OUT "\t$genome_ver";
+			# additional 5 columns - ask what they mean and if we can supply them...
+			print OUT "\tNA\tNA\tNA\tNA\tNA";
+			# print a row from the data matrix - somewhat tricky
+			my @arr = split '', $data[$pos]; #get an array of ascii values, only every $enc is printable as character
+			for(my $j=0; $j<=$#arr; $j++)       # this loop should be over taxa
+                        {
+				my $outchar = $arr[$j];
+				if($outformat eq "NUMERIC") { $outchar = allele_encode($arr[$j], @alleles) };
+                                if($j % $enc == 0)
+                                {
+                                        print OUT "\t$outchar";
+                                }
+                                else
+                                {
+                                        print OUT "\t" . ord($outchar);
+                                }
+				if($progress>0)
+				{
+					if($curit%$pstep==0)
+					{
+						my $ppp = int(1000*$curit/$allit)/10;
+						$flush->("$curit/$allit $ppp\%");
+					}
+				}
+				$curit++;
+                        }
+                        print OUT "\n";    # end of the row
+		}
+		if($progress>0){$flush->("$curit/$allit 100%");}
+
+		close OUT;
+	}      # end of orientation "tf" option
+	else   # if orientation is "pf", a transposed HapMap file will be produced...
+	{
+		my $isfilenew = 1;
+                if( -s $outfname) { $isfilenew = 0; }
+
+		open(IN,$outfname);
+                open(OUT,">${outfname}_append");
+
+		my $nn = $nt;
+                my $n_taxa = $nn + $np + $np;
+                my $n_marker = $nn + $np + $np + $nt;
+                my $n_allele = $nn + $np;		
+
+		# Print line with markers
+		my $line_old = "";
+		if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+		if($isfilenew) { print OUT "rs#"; }
+		my $pos;
+		for($pos=0;$pos<$np;$pos++)
+		{
+			if($data[$pos+$n_marker] eq "" || $data[$pos+$n_marker] eq "Cannot open table markers")
+			{
+				print OUT "\t$chr" . "_$data[$pos+$nt]";
+			}
+			else
+			{
+				print OUT "\t$data[$pos+$n_marker]";
+			}
+		}
+		print OUT "\n";
+
+		# print line with alleles
+		$line_old = "";
+                if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+		if($isfilenew) { print OUT "alleles"; }
+                for($pos=0;$pos<$np;$pos++)
+                {
+                        print OUT "\t$data[$pos+$n_allele]";
+                }
+		print OUT "\n";
+
+		# print line with chromosomes
+		$line_old = "";
+                if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+		if($isfilenew) { print OUT "chrom"; }
+                for($pos=0;$pos<$np;$pos++)
+                {
+                         print OUT"\t$chr";
+                }
+		print OUT "\n";
+
+		# print line with positions
+		$line_old = "";
+                if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+	 	if($isfilenew) { print OUT "pos"; }
+                for($pos=0;$pos<$np;$pos++)
+                {
+                        print OUT "\t$data[$pos+$nt]";
+                }
+		print OUT "\n";
+
+		# print line with strand (always "+")
+		$line_old = "";
+                if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+		if($isfilenew) { print OUT "strand"; }
+                for($pos=0;$pos<$np;$pos++)
+                {
+                        print OUT "\t+";
+                }
+		print OUT "\n";
+
+		# print 6 more lines here
+		$line_old = "";
+                if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+                if($isfilenew) { print OUT "assembly#"; }
+                for($pos=0;$pos<$np;$pos++)
+                {
+                        print OUT "\t$genome_ver";
+                }
+                print OUT "\n";
+
+                $line_old = "";
+                if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+                if($isfilenew) { print OUT "center"; }
+                for($pos=0;$pos<$np;$pos++)
+                {
+                        print OUT "\tNA";
+                }
+                print OUT "\n";
+
+                $line_old = "";
+                if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+                if($isfilenew) { print OUT "protLSID"; }
+                for($pos=0;$pos<$np;$pos++)
+                {
+                        print OUT "\tNA";
+                }
+                print OUT "\n";
+
+                $line_old = "";
+                if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+                if($isfilenew) { print OUT "assayLSID"; }
+                for($pos=0;$pos<$np;$pos++)
+                {
+                        print OUT "\tNA";
+                }
+                print OUT "\n";
+
+                $line_old = "";
+                if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+                if($isfilenew) { print OUT "panelLSID"; }
+                for($pos=0;$pos<$np;$pos++)
+                {
+                        print OUT "\tNA";
+                }
+                print OUT "\n";
+
+                $line_old = "";
+                if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+                if($isfilenew) { print OUT "QCcode"; }
+                for($pos=0;$pos<$np;$pos++)
+                {
+                        print OUT "\tNA";
+                }
+                print OUT "\n";
+
+		# print genotype lines
+		my $allit = 0;
+		for(my $it=0;$it<$nt;$it++)
+		{
+			$allit += length($data[$it]); #get an array of ascii values, only every $enc is printable as character
+		}
+		my $curit = 0;
+		my $pstep = 0;
+		if($progress>0){$pstep = int($allit/$progress);}
+		for(my $it=0;$it<$nt;$it++)
+		{
+			$line_old = "";
+	                if(! $isfilenew) { $line_old =<IN>; chomp $line_old; print OUT $line_old;}
+			if($isfilenew) { print OUT "$data[$it+$n_taxa]"; }   # taxon header
+			my @arr = split '', $data[$it]; #get an array of ascii values, only every $enc is printable as character
+                       	for(my $j=0; $j<=$#arr; $j++)   # this loop should be over positions
+                       	{
+				my $outchar = $arr[$j];
+                                if($outformat eq "NUMERIC") 
+				{ 
+					my @alleles = split "/", $data[$j+$n_allele];
+					$outchar = allele_encode($arr[$j], @alleles); 
+				}
+                               	if($j % $enc == 0)
+                               	{
+                                       	print OUT "\t$outchar";
+                               	}
+                               	else
+                               	{
+                                       	print OUT "\t" . ord($outchar);
+                               	}
+				if($progress>0)
+				{
+					if($curit%$pstep==0)
+					{
+						my $ppp = int(1000*$curit/$allit)/10;
+						$flush->("$curit/$allit $ppp\%");
+					}
+				}
+				$curit++;
+                        }
+                       	print OUT "\n";    # end of the row
+		}
+		if($progress>0){$flush->("$curit/$allit 100.0\%");}
+		close IN;
+		close OUT;
+
+		`mv ${outfname}_append ${outfname}`;
+
+	}  # end of orientation selection
+
 }
 
 sub USERPASS
@@ -1232,8 +1567,9 @@ my ($data_ref) = $hdf5->TABLE(
 	'project' => $project,  #project name
 	'chr' => $chr, 		#chromosome name
 	'table' => $table,	#name of the table: 'taxa', 'positions' or 'markers'
-	'starting_index' => $starting_index,	#starting index of the table
-	'ending_index' => $ending_index	#ending index of the table
+	'position_type' => "index",	#type of the position index: 'index' - index in the array, 'value' - value of the position in positions array
+	'starting_position' => $starting_index,	#starting index of the table
+	'ending_position' => $ending_index	#ending index of the table
 	);
 my @data = @$data_ref;
 if($hdf5->{ERR} ne "")
