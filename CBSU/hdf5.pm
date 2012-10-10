@@ -162,9 +162,12 @@ sub FLIST
 
 sub PLIST
 {
-	my $self = shift;
-
+	(my $self, my @arg) = @_;
+	my %args = @arg;
 	$self->{ERR} = "";
+	my $long = 0;
+	if($args{'long'} eq "1"){$long=1;}
+
 	$| = 1;
 	my $socket = $self->open();
 	print  $socket "PLIST\n\n";
@@ -184,7 +187,15 @@ sub PLIST
 	shift @data;
 	for(my $i=0; $i<=$#data; $i++)
 	{
-		(my $txttmp, $data[$i]) = split /\t/, $data[$i];
+		(my $txttmp, my $txttmp1, my $txttmp2) = split /\t/, $data[$i];
+		if($long == 0)
+		{
+			$data[$i] = $txttmp1;
+		}
+		else
+		{
+			$data[$i] = $txttmp1 . "\t" . $txttmp2;
+		}	
 	}
 	return @data;
 }
@@ -323,7 +334,8 @@ sub PINFO
 				my $chr_txt = _encode_hash(\%chr_hash);
 				push @array_of_chromosomes, $chr_txt;
 			}	
-			%chr_hash = ('name' => $s2, 'data_pf_dim1' => 0, 'data_pf_dim2' => 0, 'data_tf_dim1' => 0, 'data_tf_dim2' => 0, 'positions_dim1' => 0, 'markers_dim1' => 0, 'markers_indexed' => "");
+			my $clen = substr($s3, 4);
+			%chr_hash = ('name' => $s2, 'data_pf_dim1' => 0, 'data_pf_dim2' => 0, 'data_tf_dim1' => 0, 'data_tf_dim2' => 0, 'positions_dim1' => 0, 'markers_dim1' => 0, 'markers_indexed' => "", 'length' => $clen);
 			$chr++;
 			next;
 		}
